@@ -16,6 +16,7 @@ const TARIFF_MULTIPLIERS: Record<string, number> = {
   CN: 2.5,   // China — elevated retaliatory tariffs
   US: 0.0,   // USA — no tariffs under USMCA
   MX: 0.0,   // Mexico — no tariffs under USMCA/CUSMA
+  CA: 0.0,   // Canada — destination country (no import tariffs from CA)
   VN: 1.5,   // Vietnam
   DE: 0.0,   // Germany — EU, no special tariffs
   JP: 0.0,   // Japan — CPTPP, no tariffs
@@ -26,6 +27,28 @@ const TARIFF_MULTIPLIERS: Record<string, number> = {
 }
 
 const HST_RATE = 0.13
+
+// Normalize country codes — handle both 2-letter and full codes
+function normalizeCountry(country: string): string {
+  const map: Record<string, string> = {
+    canada: 'CA',
+    australia: 'AU',
+    'united kingdom': 'UK',
+    'united states': 'US',
+    'usa': 'US',
+    china: 'CN',
+    mexico: 'MX',
+    vietnam: 'VN',
+    germany: 'DE',
+    japan: 'JP',
+    'south korea': 'KR',
+    korea: 'KR',
+    taiwan: 'TW',
+    india: 'IN',
+  }
+  const lower = country.toLowerCase()
+  return map[lower] || country
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -40,12 +63,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid shipment value' }, { status: 400 })
     }
 
+    const normalizedCountry = normalizeCountry(country || '')
     const industryData = INDUSTRIES[industry] || INDUSTRIES.other
-    const multiplier = TARIFF_MULTIPLIERS[country] ?? TARIFF_MULTIPLIERS.other
+    const multiplier = TARIFF_MULTIPLIERS[normalizedCountry] ?? TARIFF_MULTIPLIERS.other
 
-    const effectiveRate = industryData.rate * multiplier
+    const effectiveRate = Math.round(industryData.rate * multiplier * 1000) / 1000
     const dutyAmount = Math.round(value * effectiveRate * 100) / 100
-    const hstAmount = Math.round(dutyAmount * HST_RATE * 100) / 100
+    // HST applies to (shipment value + duties) under Canadian import rules
+    const hstAmount = Math.round((value + dutyAmount) * HST_RATE * 100) / 100
     const totalCost = Math.round((value + dutyAmount + hstAmount) * 100) / 100
 
     return NextResponse.json({
